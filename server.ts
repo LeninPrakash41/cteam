@@ -4,44 +4,664 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
 import africastalking from "africastalking";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 import http from "http";
 import nodemailer from "nodemailer";
+import pg from "pg";
+
+const { Pool } = pg;
+
+// PostgreSQL Database Connection & Memory Fallback
+const connectionString = process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/cteam";
+let pool: pg.Pool | null = null;
+let usePostgres = false;
+
+// Fallback in-memory DB if PostgreSQL instance is not reachable locally
+const memoryDb: {
+  users: Map<string, any>;
+  companies: Map<string, any>;
+  agents: Map<string, any>;
+  messages: Map<string, any>;
+  tasks: Map<string, any>;
+  goals: Map<string, any>;
+  assets: Map<string, any>;
+} = {
+  users: new Map(),
+  companies: new Map(),
+  agents: new Map(),
+  messages: new Map(),
+  tasks: new Map(),
+  goals: new Map(),
+  assets: new Map()
+};
+
+async function initDatabase() {
+  try {
+    pool = new Pool({
+      connectionString,
+      connectionTimeoutMillis: 3000
+    });
+    const client = await pool.connect();
+    console.log("Connected to PostgreSQL database successfully.");
+    
+    // Create PostgreSQL tables
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE,
+        name TEXT,
+        avatar_url TEXT,
+        created_at BIGINT
+      );
+
+      CREATE TABLE IF NOT EXISTS companies (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT,
+        name TEXT,
+        industry TEXT,
+        category TEXT,
+        description TEXT,
+        integrations JSONB DEFAULT '{}'::jsonb,
+        created_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS agents (
+        id TEXT PRIMARY KEY,
+        company_id TEXT,
+        role TEXT,
+        name TEXT,
+        bio TEXT,
+        expertise JSONB DEFAULT '[]'::jsonb,
+        avatar_url TEXT,
+        created_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        company_id TEXT,
+        sender_id TEXT,
+        text TEXT,
+        file_name TEXT,
+        file_content TEXT,
+        proposals JSONB DEFAULT '[]'::jsonb,
+        timestamp BIGINT
+      );
+
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        company_id TEXT,
+        title TEXT,
+        description TEXT,
+        assigned_to TEXT,
+        status TEXT,
+        created_at BIGINT
+      );
+
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        company_id TEXT,
+        objective TEXT,
+        smart_goals JSONB DEFAULT '[]'::jsonb,
+        kpis JSONB DEFAULT '[]'::jsonb,
+        created_at BIGINT
+      );
+
+      CREATE TABLE IF NOT EXISTS assets (
+        id TEXT PRIMARY KEY,
+        company_id TEXT,
+        name TEXT,
+        content TEXT,
+        created_at BIGINT
+      );
+    `);
+    client.release();
+    usePostgres = true;
+    console.log("PostgreSQL tables verified.");
+  } catch (err) {
+    console.warn("PostgreSQL connection unavailable, using application fallback database adapter:", err instanceof Error ? err.message : err);
+    usePostgres = false;
+  }
+}
 
 async function startServer() {
+  await initDatabase();
+
   const app = express();
   const PORT = 3000;
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
 
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  // WebSocket handling
-  let frontendWs: any = null;
+  // WebSocket handling & Broadcasting
+  const connectedClients = new Set<WebSocket>();
 
   wss.on("connection", (ws, req) => {
     const url = req.url;
     console.log(`WebSocket connected to: ${url}`);
+    connectedClients.add(ws);
 
-    if (url === "/api/frontend/stream") {
-      frontendWs = ws;
-      console.log("Frontend WebSocket connected");
-      ws.on("message", (message) => {
-        const data = JSON.parse(message.toString());
-        // Handle frontend audio if needed
-      });
-      ws.on("close", () => {
-        frontendWs = null;
-        console.log("Frontend WebSocket disconnected");
-      });
+    ws.on("close", () => {
+      connectedClients.delete(ws);
+      console.log("WebSocket disconnected");
+    });
+  });
+
+  function broadcastChange(event: string, payload: any) {
+    const message = JSON.stringify({ type: event, payload });
+    connectedClients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
+    });
+  }
+
+  // --- POSTGRESQL REST API ENDPOINTS ---
+
+  // Auth
+  app.post("/api/auth/login", async (req, res) => {
+    const { id, email, name, avatarUrl } = req.body;
+    const userId = id || 'user_default_123';
+    const createdAt = Date.now();
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(
+          `INSERT INTO users (id, email, name, avatar_url, created_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url`,
+          [userId, email || 'founder@example.com', name || 'Founder', avatarUrl || '', createdAt]
+        );
+      } catch (e: any) {
+        console.error("PG Auth error:", e);
+      }
     }
+    
+    const user = { id: userId, email: email || 'founder@example.com', name: name || 'Founder', avatarUrl: avatarUrl || '' };
+    memoryDb.users.set(userId, user);
+    res.json({ success: true, user });
   });
 
-  // API routes FIRST
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+  // Companies
+  app.get("/api/companies", async (req, res) => {
+    const ownerId = req.query.ownerId as string;
+    if (usePostgres && pool) {
+      try {
+        const result = await pool.query(`SELECT * FROM companies WHERE owner_id = $1 ORDER BY created_at DESC`, [ownerId]);
+        const companies = result.rows.map(r => ({
+          id: r.id,
+          ownerId: r.owner_id,
+          name: r.name,
+          industry: r.industry,
+          category: r.category,
+          description: r.description,
+          integrations: r.integrations,
+          createdAt: r.created_at
+        }));
+        return res.json({ companies });
+      } catch (e: any) {
+        console.error("PG Get Companies error:", e);
+      }
+    }
+
+    const list = Array.from(memoryDb.companies.values()).filter(c => !ownerId || c.ownerId === ownerId);
+    res.json({ companies: list });
   });
+
+  app.post("/api/companies", async (req, res) => {
+    const company = req.body;
+    if (usePostgres && pool) {
+      try {
+        await pool.query(
+          `INSERT INTO companies (id, owner_id, name, industry, category, description, integrations, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, industry = EXCLUDED.industry, category = EXCLUDED.category, description = EXCLUDED.description, integrations = EXCLUDED.integrations`,
+          [company.id, company.ownerId, company.name, company.industry, company.category, company.description, JSON.stringify(company.integrations || {}), company.createdAt]
+        );
+      } catch (e: any) {
+        console.error("PG Create Company error:", e);
+      }
+    }
+
+    memoryDb.companies.set(company.id, company);
+    broadcastChange("company_updated", company);
+    res.json({ success: true, company });
+  });
+
+  app.patch("/api/companies/:id", async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+
+    let existing = memoryDb.companies.get(id) || { id };
+    const updated = { ...existing, ...updates };
+
+    if (usePostgres && pool) {
+      try {
+        const fields: string[] = [];
+        const values: any[] = [];
+        let idx = 1;
+
+        if (updates.description !== undefined) { fields.push(`description = $${idx++}`); values.push(updates.description); }
+        if (updates.integrations !== undefined) { fields.push(`integrations = $${idx++}`); values.push(JSON.stringify(updates.integrations)); }
+        if (updates.name !== undefined) { fields.push(`name = $${idx++}`); values.push(updates.name); }
+
+        if (fields.length > 0) {
+          values.push(id);
+          await pool.query(`UPDATE companies SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        }
+      } catch (e: any) {
+        console.error("PG Patch Company error:", e);
+      }
+    }
+
+    memoryDb.companies.set(id, updated);
+    broadcastChange("company_updated", updated);
+    res.json({ success: true, company: updated });
+  });
+
+  // Agents
+  app.get("/api/companies/:companyId/agents", async (req, res) => {
+    const { companyId } = req.params;
+    if (usePostgres && pool) {
+      try {
+        const result = await pool.query(`SELECT * FROM agents WHERE company_id = $1`, [companyId]);
+        const agents = result.rows.map(r => ({
+          id: r.id,
+          companyId: r.company_id,
+          role: r.role,
+          name: r.name,
+          bio: r.bio,
+          expertise: r.expertise,
+          avatarUrl: r.avatar_url,
+          createdAt: r.created_at
+        }));
+        return res.json({ agents });
+      } catch (e: any) {
+        console.error("PG Get Agents error:", e);
+      }
+    }
+
+    const agents = Array.from(memoryDb.agents.values()).filter(a => a.companyId === companyId);
+    res.json({ agents });
+  });
+
+  app.post("/api/companies/:companyId/agents", async (req, res) => {
+    const { companyId } = req.params;
+    const { agents } = req.body;
+
+    const items = Array.isArray(agents) ? agents : [agents];
+
+    if (usePostgres && pool) {
+      try {
+        for (const agent of items) {
+          await pool.query(
+            `INSERT INTO agents (id, company_id, role, name, bio, expertise, avatar_url, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, name = EXCLUDED.name, bio = EXCLUDED.bio, expertise = EXCLUDED.expertise, avatar_url = EXCLUDED.avatar_url`,
+            [agent.id, companyId, agent.role, agent.name, agent.bio, JSON.stringify(agent.expertise || []), agent.avatarUrl, agent.createdAt || new Date().toISOString()]
+          );
+        }
+      } catch (e: any) {
+        console.error("PG Post Agents error:", e);
+      }
+    }
+
+    items.forEach(agent => memoryDb.agents.set(agent.id, { ...agent, companyId }));
+    broadcastChange("agents_updated", { companyId });
+    res.json({ success: true });
+  });
+
+  app.patch("/api/agents/:id", async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+
+    let existing = memoryDb.agents.get(id) || { id };
+    const updated = { ...existing, ...updates };
+
+    if (usePostgres && pool) {
+      try {
+        if (updates.avatarUrl) {
+          await pool.query(`UPDATE agents SET avatar_url = $1 WHERE id = $2`, [updates.avatarUrl, id]);
+        }
+      } catch (e: any) {
+        console.error("PG Patch Agent error:", e);
+      }
+    }
+
+    memoryDb.agents.set(id, updated);
+    broadcastChange("agents_updated", { companyId: updated.companyId });
+    res.json({ success: true, agent: updated });
+  });
+
+  // Messages
+  app.get("/api/companies/:companyId/messages", async (req, res) => {
+    const { companyId } = req.params;
+    if (usePostgres && pool) {
+      try {
+        const result = await pool.query(`SELECT * FROM messages WHERE company_id = $1 ORDER BY timestamp ASC`, [companyId]);
+        const messages = result.rows.map(r => ({
+          id: r.id,
+          companyId: r.company_id,
+          senderId: r.sender_id,
+          text: r.text,
+          fileName: r.file_name,
+          fileContent: r.file_content,
+          proposals: r.proposals,
+          timestamp: Number(r.timestamp)
+        }));
+        return res.json({ messages });
+      } catch (e: any) {
+        console.error("PG Get Messages error:", e);
+      }
+    }
+
+    const messages = Array.from(memoryDb.messages.values())
+      .filter(m => m.companyId === companyId)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    res.json({ messages });
+  });
+
+  app.post("/api/companies/:companyId/messages", async (req, res) => {
+    const { companyId } = req.params;
+    const msg = req.body;
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(
+          `INSERT INTO messages (id, company_id, sender_id, text, file_name, file_content, proposals, timestamp)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (id) DO NOTHING`,
+          [msg.id, companyId, msg.senderId, msg.text || '', msg.fileName || null, msg.fileContent || null, JSON.stringify(msg.proposals || []), msg.timestamp]
+        );
+      } catch (e: any) {
+        console.error("PG Post Message error:", e);
+      }
+    }
+
+    memoryDb.messages.set(msg.id, { ...msg, companyId });
+    broadcastChange("messages_updated", { companyId, message: msg });
+    res.json({ success: true, message: msg });
+  });
+
+  app.patch("/api/messages/:id", async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+
+    let existing = memoryDb.messages.get(id) || { id };
+    const updated = { ...existing, ...updates };
+
+    if (usePostgres && pool) {
+      try {
+        const fields: string[] = [];
+        const values: any[] = [];
+        let idx = 1;
+
+        if (updates.text !== undefined) { fields.push(`text = $${idx++}`); values.push(updates.text); }
+        if (updates.proposals !== undefined) { fields.push(`proposals = $${idx++}`); values.push(JSON.stringify(updates.proposals)); }
+
+        if (fields.length > 0) {
+          values.push(id);
+          await pool.query(`UPDATE messages SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        }
+      } catch (e: any) {
+        console.error("PG Patch Message error:", e);
+      }
+    }
+
+    memoryDb.messages.set(id, updated);
+    broadcastChange("messages_updated", { companyId: updated.companyId });
+    res.json({ success: true, message: updated });
+  });
+
+  // Tasks
+  app.get("/api/companies/:companyId/tasks", async (req, res) => {
+    const { companyId } = req.params;
+    if (usePostgres && pool) {
+      try {
+        const result = await pool.query(`SELECT * FROM tasks WHERE company_id = $1 ORDER BY created_at DESC`, [companyId]);
+        const tasks = result.rows.map(r => ({
+          id: r.id,
+          companyId: r.company_id,
+          title: r.title,
+          description: r.description,
+          assignedTo: r.assigned_to,
+          status: r.status,
+          createdAt: Number(r.created_at)
+        }));
+        return res.json({ tasks });
+      } catch (e: any) {
+        console.error("PG Get Tasks error:", e);
+      }
+    }
+
+    const tasks = Array.from(memoryDb.tasks.values())
+      .filter(t => t.companyId === companyId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    res.json({ tasks });
+  });
+
+  app.post("/api/companies/:companyId/tasks", async (req, res) => {
+    const { companyId } = req.params;
+    const task = req.body;
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(
+          `INSERT INTO tasks (id, company_id, title, description, assigned_to, status, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description, assigned_to = EXCLUDED.assigned_to, status = EXCLUDED.status`,
+          [task.id, companyId, task.title, task.description || '', task.assignedTo || 'user', task.status || 'pending', task.createdAt || Date.now()]
+        );
+      } catch (e: any) {
+        console.error("PG Post Task error:", e);
+      }
+    }
+
+    memoryDb.tasks.set(task.id, { ...task, companyId });
+    broadcastChange("tasks_updated", { companyId });
+    res.json({ success: true, task });
+  });
+
+  app.patch("/api/tasks/:id", async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+
+    let existing = memoryDb.tasks.get(id) || { id };
+    const updated = { ...existing, ...updates };
+
+    if (usePostgres && pool) {
+      try {
+        if (updates.status) {
+          await pool.query(`UPDATE tasks SET status = $1 WHERE id = $2`, [updates.status, id]);
+        }
+      } catch (e: any) {
+        console.error("PG Patch Task error:", e);
+      }
+    }
+
+    memoryDb.tasks.set(id, updated);
+    broadcastChange("tasks_updated", { companyId: updated.companyId });
+    res.json({ success: true, task: updated });
+  });
+
+  app.delete("/api/tasks/:id", async (req, res) => {
+    const { id } = req.params;
+    const existing = memoryDb.tasks.get(id);
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(`DELETE FROM tasks WHERE id = $1`, [id]);
+      } catch (e: any) {
+        console.error("PG Delete Task error:", e);
+      }
+    }
+
+    memoryDb.tasks.delete(id);
+    broadcastChange("tasks_updated", { companyId: existing?.companyId });
+    res.json({ success: true });
+  });
+
+  // Goals
+  app.get("/api/companies/:companyId/goals", async (req, res) => {
+    const { companyId } = req.params;
+    if (usePostgres && pool) {
+      try {
+        const result = await pool.query(`SELECT * FROM goals WHERE company_id = $1 ORDER BY created_at DESC`, [companyId]);
+        const goals = result.rows.map(r => ({
+          id: r.id,
+          companyId: r.company_id,
+          objective: r.objective,
+          smartGoals: r.smart_goals,
+          kpis: r.kpis,
+          createdAt: Number(r.created_at)
+        }));
+        return res.json({ goals });
+      } catch (e: any) {
+        console.error("PG Get Goals error:", e);
+      }
+    }
+
+    const goals = Array.from(memoryDb.goals.values())
+      .filter(g => g.companyId === companyId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    res.json({ goals });
+  });
+
+  app.post("/api/companies/:companyId/goals", async (req, res) => {
+    const { companyId } = req.params;
+    const goal = req.body;
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(
+          `INSERT INTO goals (id, company_id, objective, smart_goals, kpis, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (id) DO UPDATE SET objective = EXCLUDED.objective, smart_goals = EXCLUDED.smart_goals, kpis = EXCLUDED.kpis`,
+          [goal.id, companyId, goal.objective, JSON.stringify(goal.smartGoals || []), JSON.stringify(goal.kpis || []), goal.createdAt || Date.now()]
+        );
+      } catch (e: any) {
+        console.error("PG Post Goal error:", e);
+      }
+    }
+
+    memoryDb.goals.set(goal.id, { ...goal, companyId });
+    broadcastChange("goals_updated", { companyId });
+    res.json({ success: true, goal });
+  });
+
+  app.patch("/api/goals/:id", async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+
+    let existing = memoryDb.goals.get(id) || { id };
+    const updated = { ...existing, ...updates };
+
+    if (usePostgres && pool) {
+      try {
+        const fields: string[] = [];
+        const values: any[] = [];
+        let idx = 1;
+
+        if (updates.smartGoals !== undefined) { fields.push(`smart_goals = $${idx++}`); values.push(JSON.stringify(updates.smartGoals)); }
+        if (updates.kpis !== undefined) { fields.push(`kpis = $${idx++}`); values.push(JSON.stringify(updates.kpis)); }
+
+        if (fields.length > 0) {
+          values.push(id);
+          await pool.query(`UPDATE goals SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        }
+      } catch (e: any) {
+        console.error("PG Patch Goal error:", e);
+      }
+    }
+
+    memoryDb.goals.set(id, updated);
+    broadcastChange("goals_updated", { companyId: updated.companyId });
+    res.json({ success: true, goal: updated });
+  });
+
+  app.delete("/api/goals/:id", async (req, res) => {
+    const { id } = req.params;
+    const existing = memoryDb.goals.get(id);
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(`DELETE FROM goals WHERE id = $1`, [id]);
+      } catch (e: any) {
+        console.error("PG Delete Goal error:", e);
+      }
+    }
+
+    memoryDb.goals.delete(id);
+    broadcastChange("goals_updated", { companyId: existing?.companyId });
+    res.json({ success: true });
+  });
+
+  // Assets
+  app.get("/api/companies/:companyId/assets", async (req, res) => {
+    const { companyId } = req.params;
+    if (usePostgres && pool) {
+      try {
+        const result = await pool.query(`SELECT * FROM assets WHERE company_id = $1 ORDER BY created_at DESC`, [companyId]);
+        const assets = result.rows.map(r => ({
+          id: r.id,
+          companyId: r.company_id,
+          name: r.name,
+          content: r.content,
+          createdAt: Number(r.created_at)
+        }));
+        return res.json({ assets });
+      } catch (e: any) {
+        console.error("PG Get Assets error:", e);
+      }
+    }
+
+    const assets = Array.from(memoryDb.assets.values())
+      .filter(a => a.companyId === companyId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    res.json({ assets });
+  });
+
+  app.post("/api/companies/:companyId/assets", async (req, res) => {
+    const { companyId } = req.params;
+    const asset = req.body;
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(
+          `INSERT INTO assets (id, company_id, name, content, created_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, content = EXCLUDED.content`,
+          [asset.id, companyId, asset.name, asset.content, asset.createdAt || Date.now()]
+        );
+      } catch (e: any) {
+        console.error("PG Post Asset error:", e);
+      }
+    }
+
+    memoryDb.assets.set(asset.id, { ...asset, companyId });
+    broadcastChange("assets_updated", { companyId });
+    res.json({ success: true, asset });
+  });
+
+  app.delete("/api/assets/:id", async (req, res) => {
+    const { id } = req.params;
+    const existing = memoryDb.assets.get(id);
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(`DELETE FROM assets WHERE id = $1`, [id]);
+      } catch (e: any) {
+        console.error("PG Delete Asset error:", e);
+      }
+    }
+
+    memoryDb.assets.delete(id);
+    broadcastChange("assets_updated", { companyId: existing?.companyId });
+    res.json({ success: true });
+  });
+
+  // --- EXISTING HUBSPOT & THIRD-PARTY TOOL APIS ---
 
   app.post("/api/hubspot/contact", async (req, res) => {
     const { apiKey, email, firstname, lastname, phone } = req.body;
@@ -78,7 +698,6 @@ async function startServer() {
     }
   });
 
-  // Helper to find contact by email
   const getContactByEmail = async (apiKey: string, email: string) => {
     const response = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
       method: 'POST',
@@ -112,7 +731,7 @@ async function startServer() {
           properties: { hs_note_body: noteBody },
           associations: [{
             to: { id: contactId },
-            types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 202 }] // Note to Contact
+            types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 202 }]
           }]
         })
       });
@@ -147,7 +766,7 @@ async function startServer() {
           },
           associations: [{
             to: { id: contactId },
-            types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 204 }] // Task to Contact
+            types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 204 }]
           }]
         })
       });
@@ -198,7 +817,6 @@ async function startServer() {
       const contactId = await getContactByEmail(apiKey, email);
       if (!contactId) throw new Error("Contact not found");
 
-      // Get email associations
       const assocResponse = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/emails`, {
         headers: {
           'Authorization': `Bearer ${apiKey}`,
@@ -215,7 +833,6 @@ async function startServer() {
 
       const emailIds = assocData.results.map((r: any) => ({ id: r.id }));
 
-      // Batch read emails
       const emailsResponse = await fetch('https://api.hubapi.com/crm/v3/objects/emails/batch/read', {
         method: 'POST',
         headers: {
@@ -320,9 +937,6 @@ async function startServer() {
     }
   });
 
-  app.use(express.urlencoded({ extended: true }));
-
-  // In-memory store for active calls (for prototype purposes)
   const activeCalls = new Map<string, { company: any, objective: string, history: any[], phone?: string, firstPitch?: string }>();
   const callSummaries: any[] = [];
 
@@ -345,18 +959,13 @@ async function startServer() {
       
       const at = africastalking({ apiKey, username });
       const voice = at.VOICE;
-      
-      // Note: Africa's Talking requires a verified virtual number to make outbound calls.
       const fromNumber = virtualNumber || process.env.AFRICAS_TALKING_FROM_NUMBER || "+254711082000";
       
-      // Format phone number to E.164 if it starts with 0
       let formattedPhone = phone;
       if (formattedPhone.startsWith('0')) {
-        // Default to Nigerian code if it looks like a Nigerian number (11 digits starting with 070, 080, 090, 081, 091)
         if (formattedPhone.length === 11) {
           formattedPhone = '+234' + formattedPhone.substring(1);
         } else if (formattedPhone.length === 10) {
-          // Default to Kenyan code if it looks like a Kenyan number (10 digits starting with 07 or 01)
           formattedPhone = '+254' + formattedPhone.substring(1);
         }
       }
@@ -366,13 +975,11 @@ async function startServer() {
         callTo: [formattedPhone]
       });
       
-      // Store the call context for the webhook
       if (result && result.entries && result.entries.length > 0) {
         const sessionId = result.entries[0].sessionId;
         const callContext = { company, objective, history: [], phone: formattedPhone, firstPitch: "Hello?" };
         activeCalls.set(sessionId, callContext);
         
-        // Pre-generate the first pitch asynchronously so it's ready when they pick up
         const prompt = `You are the CMO of ${company.name} (${company.industry}). 
         Company description: ${company.description}
         You are making an outbound phone call to a lead. 
@@ -394,13 +1001,11 @@ async function startServer() {
     }
   });
 
-  // Helper to call Gemini for voice
   async function generateVoiceResponse(prompt: string, history: any[], audioUrl?: string) {
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     
     let contents: any[] = [...history];
-    
     let currentUserParts: any[] = [];
     
     if (audioUrl) {
@@ -409,7 +1014,6 @@ async function startServer() {
         const audioBuffer = await audioRes.arrayBuffer();
         const mimeType = audioRes.headers.get('content-type') || 'audio/mp3';
         const base64Audio = Buffer.from(audioBuffer).toString('base64');
-        
         currentUserParts.push({ inlineData: { data: base64Audio, mimeType } });
       } catch (e) {
         console.error("Failed to fetch audio from AT:", e);
@@ -417,13 +1021,8 @@ async function startServer() {
       }
     }
     
-    // Add the system prompt to enforce behavior
     currentUserParts.push({ text: prompt });
-    
-    contents.push({
-      role: 'user',
-      parts: currentUserParts
-    });
+    contents.push({ role: 'user', parts: currentUserParts });
 
     try {
       const response = await ai.models.generateContent({
@@ -432,7 +1031,6 @@ async function startServer() {
       });
       
       const text = response.text || "I'm sorry, I didn't catch that.";
-      // Clean up text for TTS (remove markdown, emojis, escape XML)
       let cleanText = text.replace(/[*_#`]/g, '').replace(/[\u{1F600}-\u{1F6FF}]/gu, '');
       cleanText = cleanText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       return cleanText;
@@ -442,17 +1040,13 @@ async function startServer() {
     }
   }
 
-  // Africa's Talking Voice Callback Webhook
   app.post("/api/at/voice", async (req, res) => {
     console.log("Received incoming call webhook from Africa's Talking", req.body);
     const { sessionId, isActive, recordingUrl, callerNumber, destinationNumber } = req.body;
     
-    // Log to file for debugging
     try {
       fs.appendFileSync('at_webhook.log', JSON.stringify({ body: req.body, headers: req.headers }) + '\n');
-    } catch (e) {
-      console.error("Failed to write to log file", e);
-    }
+    } catch (e) {}
     
     if (isActive === '0') {
       let callContext = activeCalls.get(sessionId);
@@ -466,7 +1060,6 @@ async function startServer() {
       }
       
       if (callContext) {
-        // Generate summary
         try {
           const { GoogleGenAI } = await import("@google/genai");
           const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -503,14 +1096,11 @@ async function startServer() {
       return res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     }
 
-    // Try to find call context by sessionId or destinationNumber
     let callContext = activeCalls.get(sessionId);
     if (!callContext) {
-      // Fallback: find by destination number
       for (const [key, value] of activeCalls.entries()) {
         if (value.phone === destinationNumber || value.phone === callerNumber) {
           callContext = value;
-          // Update the session ID to the new one
           activeCalls.set(sessionId, callContext);
           break;
         }
@@ -518,17 +1108,12 @@ async function startServer() {
     }
 
     if (!callContext) {
-      try {
-        fs.appendFileSync('at_webhook.log', 'Call context not found for session: ' + sessionId + '\n');
-      } catch (e) {}
       res.type('application/xml');
       return res.send('<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, an error occurred.</Say></Response>');
     }
 
     let aiResponseText = "";
-
     if (!recordingUrl && callContext.history.length === 0) {
-      // First turn
       if (callContext.firstPitch) {
         aiResponseText = callContext.firstPitch;
       } else {
@@ -538,20 +1123,16 @@ async function startServer() {
         Your objective for this call is: ${callContext.objective}
         
         Start the conversation naturally. Pitch the product based on the objective. Keep it brief, conversational, and end with a question to engage them. Do not use emojis or special characters.`;
-        
         aiResponseText = await generateVoiceResponse(prompt, callContext.history);
       }
       callContext.history.push({ role: 'user', parts: [{ text: "Call started." }] });
       callContext.history.push({ role: 'model', parts: [{ text: aiResponseText }] });
     } else if (recordingUrl) {
-      // User spoke
       const prompt = `You are the CMO of ${callContext.company.name}. You are on a phone call. 
       Objective: ${callContext.objective}
       The user just spoke. Listen to their audio and respond naturally, gracefully handling any interruptions or objections. Keep it conversational, brief, and persuasive. Do not use emojis or special characters.`;
       
       aiResponseText = await generateVoiceResponse(prompt, callContext.history, recordingUrl);
-      
-      // We don't push the audio to history to save context window, we just push the text representation
       callContext.history.push({ role: 'user', parts: [{ text: "(User spoke)" }] });
       callContext.history.push({ role: 'model', parts: [{ text: aiResponseText }] });
     } else {
@@ -568,7 +1149,6 @@ async function startServer() {
     res.send(response);
   });
 
-  // Africa's Talking Account Verification Ping (Sends a dummy SMS to trigger account verification)
   app.post("/api/at/verify", async (req, res) => {
     const { apiKey, username } = req.body;
     try {
@@ -584,20 +1164,17 @@ async function startServer() {
       try {
         appData = await application.fetchApplicationData();
       } catch (e: any) {
-        console.log("App data fetch failed:", e);
         appDataError = e.message;
       }
       
       let smsResult = null;
       let smsError = null;
       try {
-        // Send a dummy SMS to a sandbox number to trigger API activity
         smsResult = await sms.send({
           to: ['+254700000000'],
           message: 'Account verification ping from AI Studio'
         });
       } catch (e: any) {
-        console.log("SMS send failed:", e);
         smsError = e.message;
       }
       
@@ -610,14 +1187,12 @@ async function startServer() {
       
       res.json({ success: true, message: "API Ping successful", result: smsResult, appData });
     } catch (error: any) {
-      console.error("Africa's Talking verify error:", error);
       res.status(500).json({ error: error.message || "Failed to ping API" });
     }
   });
 
-  // API routes MUST go before Vite middleware
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+    res.json({ status: "ok", postgres: usePostgres });
   });
 
   // Vite middleware for development

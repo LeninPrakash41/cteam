@@ -4,8 +4,7 @@ import { motion } from 'motion/react';
 import { useCSuite } from '../store';
 import { generateTeam } from '../services/ai';
 import { Loader2 } from 'lucide-react';
-import { db } from '../firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { apiFetch } from '../db';
 import { v4 as uuidv4 } from 'uuid';
 import { INDUSTRIES, CATEGORIES } from '../constants';
 
@@ -44,7 +43,10 @@ export function Onboarding() {
         createdAt: new Date().toISOString()
       };
       
-      await setDoc(doc(db, 'companies', companyId), newCompany);
+      await apiFetch('/api/companies', {
+        method: 'POST',
+        body: JSON.stringify(newCompany)
+      });
       setCompany(newCompany);
 
       const generatedTeam = await generateTeam(formData.industry, formData.category, formData.name);
@@ -55,9 +57,10 @@ export function Onboarding() {
         createdAt: new Date().toISOString()
       }));
 
-      for (const agent of teamWithIds) {
-        await setDoc(doc(db, `companies/${companyId}/agents`, agent.id), agent);
-      }
+      await apiFetch(`/api/companies/${companyId}/agents`, {
+        method: 'POST',
+        body: JSON.stringify({ agents: teamWithIds })
+      });
       
       setTeam(teamWithIds);
       navigate('/dashboard');

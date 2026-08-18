@@ -1,6 +1,5 @@
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
-import { collection, addDoc, getDocs, getDoc, query, where, updateDoc, doc } from "firebase/firestore";
-import { db } from "../firebase";
+import { apiFetch } from "../db";
 import { Agent, CompanyContext, Message, Task, Goal, Proposal, MarketingAsset } from "../types";
 
 // Helper for Firestore error handling as per guidelines
@@ -707,14 +706,8 @@ export async function chatWithBoardStream(
             fullResponse += `\n\n*(Checking tasks...)*`;
             
             try {
-              const tasksRef = collection(db, `companies/${company.id}/tasks`);
-              const q = query(tasksRef, where("assignedTo", "==", agentId));
-              const querySnapshot = await getDocs(q);
-              
-              const tasksList = querySnapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              }));
+              const res = await apiFetch<{ tasks: Task[] }>(`/api/companies/${company.id}/tasks`);
+              const tasksList = (res.tasks || []).filter(t => t.assignedTo === agentId);
               
               toolResultsText += `Tool 'get_tasks' success: Found ${tasksList.length} tasks. Data: ${JSON.stringify(tasksList)}\n`;
               hasToolResults = true;
@@ -741,8 +734,10 @@ export async function chatWithBoardStream(
             fullResponse += `\n\n*(Updating task status...)*`;
             
             try {
-              const taskRef = doc(db, `companies/${company.id}/tasks`, args.taskId);
-              await updateDoc(taskRef, { status: args.status });
+              await apiFetch(`/api/tasks/${args.taskId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ status: args.status })
+              });
               
               toolResultsText += `Tool 'update_task_status' success: Status updated to ${args.status}\n`;
               hasToolResults = true;
@@ -756,8 +751,9 @@ export async function chatWithBoardStream(
             fullResponse += `\n\n*(Scheduling new task...)*`;
             
             try {
-              const tasksRef = collection(db, `companies/${company.id}/tasks`);
+              const taskId = Math.random().toString(36).substring(7);
               const newTask = {
+                id: taskId,
                 companyId: company.id,
                 assignedTo: args.assignedTo,
                 title: args.title,
@@ -766,8 +762,11 @@ export async function chatWithBoardStream(
                 createdAt: Date.now()
               };
               
-              const docRef = await addDoc(tasksRef, newTask);
-              toolResultsText += `Tool 'create_task' success: Task created with ID ${docRef.id}\n`;
+              await apiFetch(`/api/companies/${company.id}/tasks`, {
+                method: 'POST',
+                body: JSON.stringify(newTask)
+              });
+              toolResultsText += `Tool 'create_task' success: Task created with ID ${taskId}\n`;
               hasToolResults = true;
             } catch (err) {
               toolResultsText += `Tool 'create_task' error: Failed to create task\n`;
@@ -779,18 +778,22 @@ export async function chatWithBoardStream(
             fullResponse += `\n\n*(Creating document...)*`;
             
             try {
-              const assetsRef = collection(db, `companies/${company.id}/assets`);
+              const assetId = Math.random().toString(36).substring(7);
               const newAsset = {
+                id: assetId,
                 companyId: company.id,
                 name: args.title,
                 content: args.content,
                 createdAt: Date.now()
               };
               
-              const docRef = await addDoc(assetsRef, newAsset);
+              await apiFetch(`/api/companies/${company.id}/assets`, {
+                method: 'POST',
+                body: JSON.stringify(newAsset)
+              });
               createdFileName = args.title;
               createdFileContent = args.content;
-              toolResultsText += `Tool 'create_document' success: Document created with ID ${docRef.id}\n`;
+              toolResultsText += `Tool 'create_document' success: Document created with ID ${assetId}\n`;
               hasToolResults = true;
             } catch (err) {
               toolResultsText += `Tool 'create_document' error: Failed to create document\n`;
@@ -802,15 +805,11 @@ export async function chatWithBoardStream(
             fullResponse += `\n\n*(Editing document...)*`;
             
             try {
-              const assetRef = doc(db, `companies/${company.id}/assets`, args.documentId);
-              const assetSnap = await getDoc(assetRef);
-              await updateDoc(assetRef, { content: args.newContent });
-              
-              if (assetSnap.exists()) {
-                createdFileName = assetSnap.data().name;
-                createdFileContent = args.newContent;
-              }
-              
+              await apiFetch(`/api/companies/${company.id}/assets`, {
+                method: 'POST',
+                body: JSON.stringify({ id: args.documentId, companyId: company.id, content: args.newContent })
+              });
+              createdFileContent = args.newContent;
               toolResultsText += `Tool 'edit_document' success: Document updated\n`;
               hasToolResults = true;
             } catch (err) {

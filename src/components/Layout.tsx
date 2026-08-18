@@ -4,7 +4,7 @@ import { Users, MessageSquare, LogOut, Briefcase, Target, Menu, X, Settings } fr
 import { useCSuite } from '../store';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { logOut } from '../firebase';
+import { logOut } from '../db';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

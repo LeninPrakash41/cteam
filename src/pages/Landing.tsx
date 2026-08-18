@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowRight, Briefcase, Users, Zap } from 'lucide-react';
 import { useCSuite } from '../store';
-import { signInWithGoogle } from '../firebase';
+import { signInWithGoogle } from '../db';
 
 export function Landing() {
   const navigate = useNavigate();

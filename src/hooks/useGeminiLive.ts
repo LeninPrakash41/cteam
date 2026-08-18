@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type } from "@google/genai";
-import { collection, addDoc, getDocs, query, where, updateDoc, doc } from "firebase/firestore";
-import { db } from '../firebase';
+import { apiFetch } from '../db';
 import { Agent, CompanyContext } from '../types';
 
 // Helper for Firestore error handling as per guidelines
@@ -631,14 +630,8 @@ export function useGeminiLive({ company, team, onMessage }: UseGeminiLiveProps) 
                 }
               } else if (call.name === 'get_tasks') {
                 try {
-                  const tasksRef = collection(db, `companies/${company.id}/tasks`);
-                  const q = query(tasksRef, where("assignedTo", "==", activeAgentId || ""));
-                  const querySnapshot = await getDocs(q);
-                  
-                  const tasks = querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                  }));
+                  const res = await apiFetch<{ tasks: any[] }>(`/api/companies/${company.id}/tasks`);
+                  const tasks = (res.tasks || []).filter(t => t.assignedTo === activeAgentId);
                   
                   session.sendToolResponse({
                     functionResponses: [{
@@ -652,7 +645,7 @@ export function useGeminiLive({ company, team, onMessage }: UseGeminiLiveProps) 
                     functionResponses: [{
                       name: call.name,
                       id: call.id,
-                      response: { error: "Failed to fetch tasks from Firestore" }
+                      response: { error: "Failed to fetch tasks" }
                     }]
                   });
                 }
@@ -679,8 +672,10 @@ export function useGeminiLive({ company, team, onMessage }: UseGeminiLiveProps) 
               } else if (call.name === 'update_task_status') {
                 const args = call.args as any;
                 try {
-                  const taskRef = doc(db, `companies/${company.id}/tasks`, args.taskId);
-                  await updateDoc(taskRef, { status: args.status });
+                  await apiFetch(`/api/tasks/${args.taskId}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ status: args.status })
+                  });
                   
                   session.sendToolResponse({
                     functionResponses: [{
@@ -694,15 +689,16 @@ export function useGeminiLive({ company, team, onMessage }: UseGeminiLiveProps) 
                     functionResponses: [{
                       name: call.name,
                       id: call.id,
-                      response: { error: "Failed to update task in Firestore" }
+                      response: { error: "Failed to update task" }
                     }]
                   });
                 }
               } else if (call.name === 'create_task') {
                 const args = call.args as any;
                 try {
-                  const tasksRef = collection(db, `companies/${company.id}/tasks`);
+                  const taskId = Math.random().toString(36).substring(7);
                   const newTask = {
+                    id: taskId,
                     companyId: company.id,
                     assignedTo: args.assignedTo,
                     title: args.title,
@@ -711,13 +707,16 @@ export function useGeminiLive({ company, team, onMessage }: UseGeminiLiveProps) 
                     createdAt: Date.now()
                   };
                   
-                  const docRef = await addDoc(tasksRef, newTask);
+                  await apiFetch(`/api/companies/${company.id}/tasks`, {
+                    method: 'POST',
+                    body: JSON.stringify(newTask)
+                  });
                   
                   session.sendToolResponse({
                     functionResponses: [{
                       name: call.name,
                       id: call.id,
-                      response: { success: true, taskId: docRef.id }
+                      response: { success: true, taskId }
                     }]
                   });
                 } catch (err) {
@@ -725,7 +724,7 @@ export function useGeminiLive({ company, team, onMessage }: UseGeminiLiveProps) 
                     functionResponses: [{
                       name: call.name,
                       id: call.id,
-                      response: { error: "Failed to create task in Firestore" }
+                      response: { error: "Failed to create task" }
                     }]
                   });
                 }
