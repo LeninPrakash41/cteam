@@ -35,6 +35,9 @@ const memoryDb: {
   assets: new Map()
 };
 
+memoryDb.users.set('admin_01', { id: 'admin_01', email: 'admin@csuite.ai', name: 'System Admin', avatarUrl: 'https://picsum.photos/seed/admin/200' });
+memoryDb.users.set('user_default_123', { id: 'user_default_123', email: 'founder@example.com', name: 'Founder', avatarUrl: 'https://picsum.photos/seed/founder/200' });
+
 async function initDatabase() {
   try {
     pool = new Pool({
@@ -113,6 +116,13 @@ async function initDatabase() {
         content TEXT,
         created_at BIGINT
       );
+
+      -- Seed Default Admin & Founder accounts
+      INSERT INTO users (id, email, name, avatar_url, created_at)
+      VALUES 
+        ('admin_01', 'admin@csuite.ai', 'System Admin', 'https://picsum.photos/seed/admin/200', 1700000000000),
+        ('user_default_123', 'founder@example.com', 'Founder', 'https://picsum.photos/seed/founder/200', 1700000000000)
+      ON CONFLICT (id) DO NOTHING;
     `);
     client.release();
     usePostgres = true;
