@@ -1,0 +1,52 @@
+{
+  "name": "react-example",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "start": "node dist/server.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --target=node18 --outfile=dist/server.cjs --external:vite --external:express --external:africastalking --external:ws --external:nodemailer --external:@google/genai",
+    "preview": "vite preview",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^1.48.0",
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/nodemailer": "^8.0.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "africastalking": "^0.7.9",
+    "clsx": "^2.1.1",
+    "docx": "^9.6.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "file-saver": "^2.0.5",
+    "firebase": "^12.10.0",
+    "lucide-react": "^0.546.0",
+    "mammoth": "^1.12.0",
+    "motion": "^12.23.24",
+    "nodemailer": "^8.0.4",
+    "pdfjs-dist": "^5.5.207",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.13.1",
+    "tailwind-merge": "^3.5.0",
+    "uuid": "^13.0.0",
+    "vite": "^6.2.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/file-saver": "^2.0.7",
+    "@types/node": "^22.14.0",
+    "@types/uuid": "^10.0.0",
+    "autoprefixer": "^10.4.21",
+    "esbuild": "^0.28.0",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
