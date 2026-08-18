@@ -1,15 +1,31 @@
 # CSuite: Your Virtual AI Boardroom
 
-## Live Deployment
-The project has been successfully deployed to Vercel. You can access and test the live application here:
-**[https://csuite-chi.vercel.app/](https://csuite-chi.vercel.app/)**
+## Local Development & Setup
+
+Follow these steps to set up and run the application locally:
+
+### 1. Clone the Repository & Install Dependencies
+```bash
+git clone https://github.com/LeninPrakash41/cteam.git
+cd cteam
+npm install
+```
+
+### 2. Configure Environment Variables
+Copy `.env.example` to `.env` and configure your API keys (e.g., Firebase, Gemini API credentials).
+
+### 3. Run the Development Server
+```bash
+npm run dev
+```
+Open your browser and navigate to `http://localhost:5000` (or the local port shown in your terminal).
 
 ## Reproducible Testing Instructions
 
 To thoroughly test the application and its features, please follow these step-by-step instructions:
 
 ### 1. Access the Application
-- Navigate to the live deployment link: [https://csuite-chi.vercel.app/](https://csuite-chi.vercel.app/)
+- Open your browser to `http://localhost:5000` (or your local development URL).
 - Click on **"Get Started"** or **"Login"** to authenticate using your Google account.
 
 ### 2. Onboarding (First-time users)
