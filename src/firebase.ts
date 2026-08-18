@@ -1,10 +1,22 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import configFile from '../firebase-applet-config.json';
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || configFile.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || configFile.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || configFile.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || configFile.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || configFile.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || configFile.appId,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || configFile.measurementId,
+};
+
+const databaseId = import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || configFile.firestoreDatabaseId;
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 export const auth = getAuth(app);
 
 export const signInWithGoogle = async () => {
