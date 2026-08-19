@@ -189,7 +189,11 @@ export function useGeminiLive({ company, team, onMessage }: UseGeminiLiveProps) 
     try {
       setError(null);
       transcriptionBufferRef.current = '';
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const apiKey =
+        (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
+        (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) ||
+        'DEMO_KEY';
+      const ai = new GoogleGenAI({ apiKey });
       
       const systemInstruction = `You are the virtual C-Suite board of ${company.name}. 
       The board members are:

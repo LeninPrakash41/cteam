@@ -22,7 +22,16 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+function getGeminiApiKey(): string {
+  const key =
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) ||
+    (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY);
+  return key || 'DEMO_KEY';
+}
+
+function getAiClient(): GoogleGenAI {
+  return new GoogleGenAI({ apiKey: getGeminiApiKey() });
+}
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 5, delay = 2000): Promise<T> {
   try {
@@ -59,7 +68,7 @@ export async function generateTeam(industry: string, category: string, companyNa
   - avatarUrl: a realistic avatar URL using picsum (e.g., "https://picsum.photos/seed/ceo-${companyName.replace(/\\s+/g, '')}/200")
   `;
 
-  const response = await withRetry(async () => await ai.models.generateContent({
+  const response = await withRetry(async () => await getAiClient().models.generateContent({
     model: "gemini-3-flash-preview",
     contents: prompt,
     config: {
@@ -109,7 +118,7 @@ export async function generateGoals(objective: string, company: CompanyContext):
   - kpis: an array of strings (the KPIs)
   `;
 
-  const response = await withRetry(async () => await ai.models.generateContent({
+  const response = await withRetry(async () => await getAiClient().models.generateContent({
     model: "gemini-3-flash-preview",
     contents: prompt,
     config: {
@@ -207,7 +216,7 @@ export async function chatWithBoardStream(
 
   let selectedAgents: string[] = [];
   try {
-    const response = await ai.models.generateContent({
+    const response = await getAiClient().models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
@@ -473,7 +482,7 @@ export async function chatWithBoardStream(
     agentPrompt += `\n\nCurrent Conversation:\n${currentHistory}\n\nYour Response:`;
 
     try {
-      let stream = await withRetry(async () => await ai.models.generateContentStream({
+      let stream = await withRetry(async () => await getAiClient().models.generateContentStream({
         model: "gemini-3.1-pro-preview",
         contents: agentPrompt,
         config: {
@@ -832,7 +841,7 @@ export async function chatWithBoardStream(
         }
 
         if (hasToolResults) {
-          let stream2 = await withRetry(async () => await ai.models.generateContentStream({
+          let stream2 = await withRetry(async () => await getAiClient().models.generateContentStream({
             model: "gemini-3.1-pro-preview",
             contents: agentPrompt + "\n\n" + fullResponse + toolResultsText + "\n\nNow, provide your final response to the Founder using the tool results above.",
             config: {}
@@ -913,7 +922,7 @@ export async function generateSummary(
 
   const prompt = `Boardroom Discussion Transcript:\n${transcript}\n\nChat History:\n${chatHistoryText}\n\nActive Tasks:\n${tasks.map(t => `- ${t.title} (Status: ${t.status})`).join("\n")}\n\nActive Goals:\n${goals.map(g => `- ${g.objective}`).join("\n")}\n\nGenerate the summary.`;
 
-  const response = await withRetry(async () => await ai.models.generateContent({
+  const response = await withRetry(async () => await getAiClient().models.generateContent({
     model: "gemini-3-flash-preview",
     contents: prompt,
     config: {
