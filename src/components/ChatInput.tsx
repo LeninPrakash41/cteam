@@ -14,6 +14,7 @@ interface ChatInputProps {
   team: Agent[];
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
   toggleVoiceMode: () => void;
+  suggestedInput?: string;
 }
 
 export const ChatInput = React.memo(({
@@ -27,7 +28,8 @@ export const ChatInput = React.memo(({
   clearFile,
   team,
   handleFileChange,
-  toggleVoiceMode
+  toggleVoiceMode,
+  suggestedInput
 }: ChatInputProps) => {
   const [input, setInput] = useState('');
   const [showTagMenu, setShowTagMenu] = useState(false);
@@ -37,6 +39,12 @@ export const ChatInput = React.memo(({
       setInput(editingMessage.text);
     }
   }, [editingMessage]);
+
+  useEffect(() => {
+    if (suggestedInput) {
+      setInput(suggestedInput);
+    }
+  }, [suggestedInput]);
 
   useEffect(() => {
     if (input.endsWith('@')) {

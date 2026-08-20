@@ -26,8 +26,70 @@ export function Boardroom() {
   const [meetingDuration, setMeetingDuration] = useState(0);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [sharedCount, setSharedCount] = useState(0);
+  const [suggestedInput, setSuggestedInput] = useState<string>('');
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const getSuggestedQuestions = () => {
+    if (!team || team.length === 0) return [];
+    const companyName = company?.name || 'our company';
+    
+    const questions: { agent?: Agent; text: string; role: string }[] = [];
+
+    team.forEach(agent => {
+      const roleLower = agent.role.toLowerCase();
+      if (roleLower.includes('ceo') || roleLower.includes('chief executive')) {
+        questions.push({
+          agent,
+          role: agent.role,
+          text: `@${agent.name} What should be our top 3 strategic priorities for ${companyName} over the next 6 months?`
+        });
+      } else if (roleLower.includes('cmo') || roleLower.includes('marketing')) {
+        questions.push({
+          agent,
+          role: agent.role,
+          text: `@${agent.name} What marketing strategy and lead acquisition channels should we prioritize right now?`
+        });
+      } else if (roleLower.includes('cto') || roleLower.includes('tech') || roleLower.includes('technology')) {
+        questions.push({
+          agent,
+          role: agent.role,
+          text: `@${agent.name} What tech stack architecture and engineering practices should we establish to scale ${companyName}?`
+        });
+      } else if (roleLower.includes('cfo') || roleLower.includes('finance') || roleLower.includes('financial')) {
+        questions.push({
+          agent,
+          role: agent.role,
+          text: `@${agent.name} How should we structure our financial runway and key unit metrics to ensure profitability?`
+        });
+      } else if (roleLower.includes('coo') || roleLower.includes('operation')) {
+        questions.push({
+          agent,
+          role: agent.role,
+          text: `@${agent.name} What operational processes should we implement to streamline execution speed?`
+        });
+      } else if (roleLower.includes('sales') || roleLower.includes('cro')) {
+        questions.push({
+          agent,
+          role: agent.role,
+          text: `@${agent.name} What outbound sales pitch and ideal customer profile (ICP) will give us high conversion?`
+        });
+      } else {
+        questions.push({
+          agent,
+          role: agent.role,
+          text: `@${agent.name} From your perspective as ${agent.role}, what critical factors are we currently overlooking?`
+        });
+      }
+    });
+
+    questions.push({
+      role: 'Full Board',
+      text: `What are the biggest market opportunities and competitive risks for ${companyName}?`
+    });
+
+    return questions.slice(0, 5);
+  };
 
   const { isConnected, isRecording, error: voiceError, volume, isThinking, activeAgentId, isMuted, setIsMuted, fullTranscript, connect, disconnect, sendImage, sendText } = useGeminiLive({
     company: company!,
@@ -900,14 +962,58 @@ export function Boardroom() {
       <div className="flex-1 overflow-y-auto p-6 relative">
         <div className="max-w-4xl mx-auto space-y-2">
           {messages.length === 0 && Object.keys(streamingMessages).length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-center">
-              <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-6">
-                <Sparkles className="w-8 h-8 text-indigo-500" />
+            <div className="flex flex-col items-center justify-center py-8 text-center max-w-2xl mx-auto">
+              <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mb-5 text-indigo-600 shadow-sm">
+                <Sparkles className="w-7 h-7" />
               </div>
-              <h2 className="text-xl font-bold text-zinc-900 mb-2">Welcome to the Boardroom</h2>
-              <p className="text-zinc-500 max-w-md">
-                Your C-Suite is ready. Ask a question, present a challenge, upload a document, or paste a website link to get started.
+              <h2 className="text-2xl font-bold text-zinc-900 mb-2">Welcome to the Boardroom</h2>
+              <p className="text-zinc-500 max-w-md mb-8 text-sm">
+                Your C-Suite executive board is assembled and ready. Click any suggested question below or address an executive using <span className="font-semibold text-indigo-600">@Name</span>.
               </p>
+
+              {/* Suggested Questions Cards */}
+              <div className="w-full text-left space-y-3">
+                <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 mb-3 px-1 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  Suggested Questions for your Board
+                </h3>
+                <div className="grid grid-cols-1 gap-2.5">
+                  {getSuggestedQuestions().map((sq, i) => (
+                    <motion.button
+                      key={i}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.08 }}
+                      onClick={() => setSuggestedInput(sq.text)}
+                      className="flex items-center gap-3.5 p-3.5 bg-white border border-zinc-200 hover:border-indigo-400 hover:shadow-md rounded-2xl text-left transition-all group"
+                    >
+                      {sq.agent ? (
+                        <img
+                          src={sq.agent.avatarUrl}
+                          alt={sq.agent.name}
+                          className="w-10 h-10 rounded-full object-cover border border-zinc-200 flex-shrink-0 shadow-xs"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-xs">
+                          C
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider block mb-0.5">
+                          {sq.role} {sq.agent ? `(${sq.agent.name})` : ''}
+                        </span>
+                        <p className="text-sm text-zinc-800 font-medium group-hover:text-indigo-900 truncate">
+                          {sq.text}
+                        </p>
+                      </div>
+                      <span className="text-xs text-indigo-600 font-semibold px-3 py-1.5 bg-indigo-50 group-hover:bg-indigo-600 group-hover:text-white rounded-xl transition-colors flex-shrink-0 shadow-2xs">
+                        Ask Board
+                      </span>
+                    </motion.button>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : (
             <>
@@ -975,6 +1081,7 @@ export function Boardroom() {
         team={team}
         handleFileChange={handleFileChange}
         toggleVoiceMode={toggleVoiceMode}
+        suggestedInput={suggestedInput}
       />
     </div>
   );
