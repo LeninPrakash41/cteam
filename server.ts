@@ -373,7 +373,7 @@ async function startServer() {
           text: r.text,
           fileName: r.file_name,
           fileContent: r.file_content,
-          proposals: r.proposals,
+          proposals: typeof r.proposals === 'string' ? JSON.parse(r.proposals) : (r.proposals || []),
           timestamp: Number(r.timestamp)
         }));
         return res.json({ messages });
@@ -438,6 +438,27 @@ async function startServer() {
     memoryDb.messages.set(id, updated);
     broadcastChange("messages_updated", { companyId: updated.companyId });
     res.json({ success: true, message: updated });
+  });
+
+  app.delete("/api/companies/:companyId/messages", async (req, res) => {
+    const { companyId } = req.params;
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(`DELETE FROM messages WHERE company_id = $1`, [companyId]);
+      } catch (e: any) {
+        console.error("PG Delete Messages error:", e);
+      }
+    }
+
+    for (const [id, msg] of memoryDb.messages.entries()) {
+      if (msg.companyId === companyId) {
+        memoryDb.messages.delete(id);
+      }
+    }
+
+    broadcastChange("messages_updated", { companyId });
+    res.json({ success: true });
   });
 
   // Tasks

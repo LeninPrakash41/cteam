@@ -220,8 +220,16 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const clearMessages = () => {
-    setMessages([]);
+  const clearMessages = async () => {
+    if (!company?.id) return;
+    try {
+      await apiFetch(`/api/companies/${company.id}/messages`, {
+        method: 'DELETE'
+      });
+      setMessages([]);
+    } catch (error) {
+      console.error("Error clearing messages:", error);
+    }
   };
 
   const addTask = async (task: Task) => {

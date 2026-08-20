@@ -3,7 +3,7 @@ import { useCSuite } from '../store';
 import { ChatMessage } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
 import { chatWithBoardStream, generateSummary } from '../services/ai';
-import { Send, Loader2, Sparkles, Paperclip, X, Mic, MicOff, Volume2, AlertCircle, Plus, Link as LinkIcon, Image as ImageIcon } from 'lucide-react';
+import { Send, Loader2, Sparkles, Paperclip, X, Mic, MicOff, Volume2, AlertCircle, Plus, Link as LinkIcon, Image as ImageIcon, History, Search, Trash2, Download, ChevronRight } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import mammoth from 'mammoth';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -19,10 +19,12 @@ import { BoardResolution } from '../types';
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export function Boardroom() {
-  const { user, company, companyLoading, team, messages, addMessage, updateMessage, tasks, goals, assets, addTask, addGoal, addAsset, addResolution } = useCSuite();
+  const { user, company, companyLoading, team, messages, addMessage, updateMessage, clearMessages, tasks, goals, assets, addTask, addGoal, addAsset, addResolution } = useCSuite();
   const [loading, setLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [fileContent, setFileContent] = useState<string>('');
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [voiceMode, setVoiceMode] = useState(false);
@@ -567,6 +569,39 @@ export function Boardroom() {
     }
   };
 
+  const handleExportTranscript = () => {
+    if (!messages || messages.length === 0) {
+      alert("No boardroom chat history to export.");
+      return;
+    }
+
+    let transcript = `====================================================\n`;
+    transcript += `CSUITE BOARDROOM STRATEGY TRANSCRIPT\n`;
+    transcript += `Company: ${company?.name || 'CSuite AI'}\n`;
+    transcript += `Exported: ${new Date().toLocaleString()}\n`;
+    transcript += `Total Messages: ${messages.length}\n`;
+    transcript += `====================================================\n\n`;
+
+    messages.forEach(msg => {
+      const sender = msg.senderId === 'user' ? 'Founder' : (team.find(a => a.id === msg.senderId)?.name || msg.senderId);
+      const role = msg.senderId === 'user' ? 'Founder' : (team.find(a => a.id === msg.senderId)?.role || '');
+      const time = new Date(msg.timestamp).toLocaleString();
+      
+      transcript += `[${time}] ${sender} (${role}):\n${msg.text}\n`;
+      if (msg.proposals && msg.proposals.length > 0) {
+        transcript += `Proposals:\n${msg.proposals.map(p => `  - [${p.status.toUpperCase()}] ${p.type}: ${p.title}`).join('\n')}\n`;
+      }
+      transcript += `\n----------------------------------------------------\n\n`;
+    });
+
+    const blob = new Blob([transcript], { type: 'text/plain;charset=utf-8' });
+    const fileName = `Boardroom_Transcript_${new Date().toISOString().slice(0, 10)}.txt`;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = fileName;
+    link.click();
+  };
+
   if (companyLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -967,6 +1002,117 @@ export function Boardroom() {
         )}
       </AnimatePresence>
 
+      {/* Chat History Slide-out Drawer */}
+      <AnimatePresence>
+        {isHistoryOpen && (
+          <div className="fixed inset-0 z-[100] flex justify-end">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsHistoryOpen(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-xs"
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col z-10 border-l border-zinc-200"
+            >
+              {/* Header */}
+              <div className="p-5 border-b border-zinc-200 flex items-center justify-between bg-zinc-50">
+                <div className="flex items-center gap-2">
+                  <History className="w-5 h-5 text-indigo-600" />
+                  <h2 className="text-lg font-bold text-zinc-900">Chat History & Logs</h2>
+                </div>
+                <button
+                  onClick={() => setIsHistoryOpen(false)}
+                  className="p-1 text-zinc-400 hover:text-zinc-600 rounded-lg hover:bg-zinc-200 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Search & Actions */}
+              <div className="p-4 border-b border-zinc-100 space-y-3">
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    type="text"
+                    value={historySearchQuery}
+                    onChange={(e) => setHistorySearchQuery(e.target.value)}
+                    placeholder="Search boardroom transcript..."
+                    className="w-full pl-9 pr-4 py-2 bg-zinc-100 border border-zinc-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <button
+                    onClick={handleExportTranscript}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 rounded-lg text-xs font-semibold transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export Transcript
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      if (confirm("Are you sure you want to clear all boardroom chat history?")) {
+                        await clearMessages();
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-semibold transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Clear History
+                  </button>
+                </div>
+              </div>
+
+              {/* History List */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {messages.length === 0 ? (
+                  <div className="text-center py-12 text-zinc-400">
+                    <History className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm font-medium">No chat history available</p>
+                  </div>
+                ) : (
+                  messages
+                    .filter(m => !historySearchQuery || m.text.toLowerCase().includes(historySearchQuery.toLowerCase()))
+                    .map(msg => {
+                      const sender = msg.senderId === 'user' ? 'Founder' : (team.find(a => a.id === msg.senderId)?.name || 'AI');
+                      const role = msg.senderId === 'user' ? 'Founder' : (team.find(a => a.id === msg.senderId)?.role || '');
+                      const avatar = msg.senderId === 'user' ? (user?.photoURL || 'https://picsum.photos/seed/founder/200') : (team.find(a => a.id === msg.senderId)?.avatarUrl || 'https://picsum.photos/seed/ai/200');
+
+                      return (
+                        <div
+                          key={msg.id}
+                          className="p-3 bg-zinc-50 border border-zinc-200 rounded-xl hover:border-indigo-300 transition-colors"
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-2">
+                              <img src={avatar} alt={sender} className="w-5 h-5 rounded-full object-cover" referrerPolicy="no-referrer" />
+                              <span className="text-xs font-bold text-zinc-900">{sender}</span>
+                              <span className="text-[10px] font-medium text-indigo-600">{role}</span>
+                            </div>
+                            <span className="text-[10px] text-zinc-400">
+                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-xs text-zinc-700 line-clamp-2 leading-relaxed font-sans">
+                            {msg.text}
+                          </p>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <header className="bg-white border-b border-zinc-200 p-6 flex-shrink-0">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div>
@@ -974,6 +1120,14 @@ export function Boardroom() {
             <p className="text-sm text-zinc-500">Discuss strategy with your executive team.</p>
           </div>
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setIsHistoryOpen(true)}
+              className="flex items-center gap-2 px-3 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-200 rounded-xl text-sm font-medium transition-colors shadow-xs"
+              title="View Chat History & Logs"
+            >
+              <History className="w-4 h-4 text-indigo-600" />
+              History
+            </button>
             <button
               onClick={toggleVoiceMode}
               className={cn(
