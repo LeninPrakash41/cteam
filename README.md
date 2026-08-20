@@ -61,3 +61,16 @@ To thoroughly test the application and its features, please follow these step-by
 - Navigate to the **Team** section.
 - Review the generated profiles, roles, bios, and expertise of your AI executive team.
 - Test the "Regenerate Avatar" button on any agent's card to ensure the avatar updates correctly.
+
+
+Default Account Credentials
+System Admin Account:
+
+Email: admin@csuite.ai
+Password: AdminPassword123!
+ID: admin_01
+Default Founder Account:
+
+Email: founder@example.com
+Password: FounderPassword123!
+ID: user_default_123

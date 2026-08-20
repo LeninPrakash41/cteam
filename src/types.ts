@@ -87,3 +87,25 @@ export interface AppState {
   team: Agent[];
   messages: Message[];
 }
+
+export interface ResolutionVote {
+  agentId: string;
+  agentName: string;
+  agentRole: string;
+  vote: 'In Favor' | 'Against' | 'Abstain';
+  comment?: string;
+}
+
+export interface BoardResolution {
+  id: string;
+  companyId: string;
+  resolutionNumber: string;
+  title: string;
+  category: 'Strategic' | 'Financial' | 'Governance' | 'Operational' | 'HR & Compensation';
+  content: string;
+  proposedBy: string;
+  status: 'Draft' | 'Passed' | 'Rejected';
+  votes: ResolutionVote[];
+  passedAt?: number;
+  createdAt: number;
+}

@@ -457,6 +457,21 @@ export async function chatWithBoardStream(
         }
       };
 
+      const createBoardResolution: FunctionDeclaration = {
+        name: "create_board_resolution",
+        description: "Draft and pass a formal Corporate Board Resolution for the company.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING, description: "Formal title of the resolution (e.g., 'Resolution to Approve Marketing Budget')" },
+            category: { type: Type.STRING, enum: ["Strategic", "Financial", "Governance", "Operational", "HR & Compensation"], description: "Category of resolution" },
+            content: { type: Type.STRING, description: "Full formal resolution text containing WHEREAS and RESOLVED THAT clauses" },
+            status: { type: Type.STRING, enum: ["Draft", "Passed"], description: "Resolution status" }
+          },
+          required: ["title", "category", "content"]
+        }
+      };
+
       const editDocument: FunctionDeclaration = {
         name: "edit_document",
         description: "Edit an existing document/asset by providing its ID and the new full content.",
@@ -474,7 +489,7 @@ export async function chatWithBoardStream(
       // so we cannot mix built-in tools with function declarations.
       // UPDATE: We upgraded to v1.48.0 which supports includeServerSideToolInvocations.
       agentToolsConfig = [
-        { functionDeclarations: [addLeadToHubspot, addNoteToHubspot, createTaskInHubspot, getContactsFromHubspot, getContactEmailsFromHubspot, sendEmail, makeOutboundCall, getTasks, updateTaskStatus, createTask, createDocument, editDocument, getRecentCalls] },
+        { functionDeclarations: [addLeadToHubspot, addNoteToHubspot, createTaskInHubspot, getContactsFromHubspot, getContactEmailsFromHubspot, sendEmail, makeOutboundCall, getTasks, updateTaskStatus, createTask, createDocument, createBoardResolution, editDocument, getRecentCalls] },
         { googleSearch: {} }
       ];
     }
@@ -823,6 +838,50 @@ export async function chatWithBoardStream(
               hasToolResults = true;
             } catch (err) {
               toolResultsText += `Tool 'edit_document' error: Failed to edit document\n`;
+              hasToolResults = true;
+            }
+          } else if (call.name === 'create_board_resolution') {
+            const args = call.args as any;
+            onStreamChunk(agentId, `\n\n*(Drafting and passing Board Resolution...)*`);
+            fullResponse += `\n\n*(Drafting and passing Board Resolution...)*`;
+            
+            try {
+              const resId = Math.random().toString(36).substring(7);
+              const year = new Date().getFullYear();
+              const num = Math.floor(100 + Math.random() * 900);
+              const resolutionNumber = `RES-${year}-${num}`;
+
+              const votes = (team || []).map(a => ({
+                agentId: a.id,
+                agentName: a.name,
+                agentRole: a.role,
+                vote: 'In Favor' as const,
+                comment: `Approved based on boardroom alignment and strategic analysis.`
+              }));
+
+              const newResolution = {
+                id: resId,
+                companyId: company.id,
+                resolutionNumber,
+                title: args.title,
+                category: args.category || 'Strategic',
+                content: args.content,
+                proposedBy: agentId,
+                status: args.status || 'Passed',
+                votes,
+                passedAt: Date.now(),
+                createdAt: Date.now()
+              };
+
+              await apiFetch(`/api/companies/${company.id}/resolutions`, {
+                method: 'POST',
+                body: JSON.stringify(newResolution)
+              });
+
+              toolResultsText += `Tool 'create_board_resolution' success: Board Resolution ${resolutionNumber} passed and recorded with ID ${resId}\n`;
+              hasToolResults = true;
+            } catch (err) {
+              toolResultsText += `Tool 'create_board_resolution' error: Failed to pass resolution\n`;
               hasToolResults = true;
             }
           } else if (call.name === 'googleSearch') {

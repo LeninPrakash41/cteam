@@ -14,6 +14,7 @@ import { Team } from './pages/Team';
 import { Boardroom } from './pages/Boardroom';
 import { Goals } from './pages/Goals';
 import { Integrations } from './pages/Integrations';
+import { Resolutions } from './pages/Resolutions';
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/team" element={<Team />} />
             <Route path="/boardroom" element={<Boardroom />} />
             <Route path="/goals" element={<Goals />} />
+            <Route path="/resolutions" element={<Resolutions />} />
             <Route path="/integrations" element={<Integrations />} />
           </Route>
         </Routes>

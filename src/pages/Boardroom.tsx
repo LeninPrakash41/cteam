@@ -13,10 +13,13 @@ import { Message, Agent, Proposal, MarketingAsset } from '../types';
 import { useGeminiLive } from '../hooks/useGeminiLive';
 import { cn } from '../components/Layout';
 
+import { generateGoals } from '../services/ai';
+import { BoardResolution } from '../types';
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 export function Boardroom() {
-  const { user, company, companyLoading, team, messages, addMessage, updateMessage, tasks, goals, assets, addTask, addGoal, addAsset } = useCSuite();
+  const { user, company, companyLoading, team, messages, addMessage, updateMessage, tasks, goals, assets, addTask, addGoal, addAsset, addResolution } = useCSuite();
   const [loading, setLoading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [fileContent, setFileContent] = useState<string>('');
@@ -128,15 +131,49 @@ export function Boardroom() {
         assignedTo: 'user',
         createdAt: Date.now()
       });
+
+      // Automatically generate & append SMART goals and KPIs for EVERY approved task proposal
+      try {
+        const goalData = await generateGoals(proposal.title, company);
+        await addGoal({
+          id: uuidv4(),
+          companyId: company.id,
+          objective: proposal.title,
+          smartGoals: goalData.smartGoals.length > 0 ? goalData.smartGoals : [proposal.title],
+          kpis: goalData.kpis,
+          createdAt: Date.now()
+        });
+      } catch (err) {
+        await addGoal({
+          id: uuidv4(),
+          companyId: company.id,
+          objective: proposal.title,
+          smartGoals: [proposal.title],
+          kpis: [],
+          createdAt: Date.now()
+        });
+      }
     } else if (proposal.type === 'goal') {
-      await addGoal({
-        id: uuidv4(),
-        companyId: company.id,
-        objective: proposal.title,
-        smartGoals: [],
-        kpis: [],
-        createdAt: Date.now()
-      });
+      try {
+        const goalData = await generateGoals(proposal.title, company);
+        await addGoal({
+          id: uuidv4(),
+          companyId: company.id,
+          objective: proposal.title,
+          smartGoals: goalData.smartGoals.length > 0 ? goalData.smartGoals : [proposal.title],
+          kpis: goalData.kpis,
+          createdAt: Date.now()
+        });
+      } catch (err) {
+        await addGoal({
+          id: uuidv4(),
+          companyId: company.id,
+          objective: proposal.title,
+          smartGoals: [proposal.title],
+          kpis: [],
+          createdAt: Date.now()
+        });
+      }
     }
 
     const msg = messages.find(m => m.id === messageId);
@@ -144,6 +181,45 @@ export function Boardroom() {
       const updatedProposals = msg.proposals.map(p => p.id === proposal.id ? { ...p, status: 'approved' as const } : p);
       await updateMessage(messageId, { proposals: updatedProposals });
     }
+  };
+
+  const handlePassResolution = async (title: string, content: string) => {
+    if (!company) return;
+    const resId = uuidv4();
+    const year = new Date().getFullYear();
+    const num = Math.floor(100 + Math.random() * 900);
+    const resolutionNumber = `RES-${year}-${num}`;
+
+    const votes = (team || []).map(a => ({
+      agentId: a.id,
+      agentName: a.name,
+      agentRole: a.role,
+      vote: 'In Favor' as const,
+      comment: `Formally voted in favor of resolution based on boardroom alignment.`
+    }));
+
+    const newRes: BoardResolution = {
+      id: resId,
+      companyId: company.id,
+      resolutionNumber,
+      title,
+      category: 'Strategic',
+      content,
+      proposedBy: 'Founder',
+      status: 'Passed',
+      votes,
+      passedAt: Date.now(),
+      createdAt: Date.now()
+    };
+
+    await addResolution(newRes);
+    await addMessage({
+      id: uuidv4(),
+      companyId: company.id,
+      senderId: 'user',
+      text: `*Formal Board Resolution ${resolutionNumber} Passed:* "${title}". Recorded in official corporate records.`,
+      timestamp: Date.now()
+    });
   };
 
   const handleSaveAsset = async (message: Message) => {
@@ -1031,6 +1107,7 @@ export function Boardroom() {
                     onApproveProposal={handleApproveProposal}
                     onRejectProposal={handleRejectProposal}
                     onSaveAsset={handleSaveAsset}
+                    onPassResolution={handlePassResolution}
                   />
                 </motion.div>
               ))}

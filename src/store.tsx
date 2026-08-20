@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
-import { Agent, CompanyContext, Message, Task, Goal, MarketingAsset } from './types';
+import { Agent, CompanyContext, Message, Task, Goal, MarketingAsset, BoardResolution } from './types';
 import { AuthUser, getStoredUser, apiFetch } from './db';
 
 interface CSuiteContextType {
@@ -27,6 +27,10 @@ interface CSuiteContextType {
   assets: MarketingAsset[];
   addAsset: (asset: MarketingAsset) => Promise<void>;
   deleteAsset: (assetId: string) => Promise<void>;
+  resolutions: BoardResolution[];
+  addResolution: (resolution: BoardResolution) => Promise<void>;
+  updateResolution: (id: string, updates: Partial<BoardResolution>) => Promise<void>;
+  deleteResolution: (id: string) => Promise<void>;
 }
 
 const CSuiteContext = createContext<CSuiteContextType | undefined>(undefined);
@@ -41,6 +45,7 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [assets, setAssets] = useState<MarketingAsset[]>([]);
+  const [resolutions, setResolutions] = useState<BoardResolution[]>([]);
 
   // 1. Auth initialization
   useEffect(() => {
@@ -100,12 +105,13 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const [agentsData, msgData, taskData, goalData, assetData] = await Promise.all([
+      const [agentsData, msgData, taskData, goalData, assetData, resData] = await Promise.all([
         apiFetch<{ agents: Agent[] }>(`/api/companies/${company.id}/agents`),
         apiFetch<{ messages: Message[] }>(`/api/companies/${company.id}/messages`),
         apiFetch<{ tasks: Task[] }>(`/api/companies/${company.id}/tasks`),
         apiFetch<{ goals: Goal[] }>(`/api/companies/${company.id}/goals`),
-        apiFetch<{ assets: MarketingAsset[] }>(`/api/companies/${company.id}/assets`)
+        apiFetch<{ assets: MarketingAsset[] }>(`/api/companies/${company.id}/assets`),
+        apiFetch<{ resolutions: BoardResolution[] }>(`/api/companies/${company.id}/resolutions`)
       ]);
 
       setTeam(agentsData.agents || []);
@@ -113,6 +119,7 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
       setTasks(taskData.tasks || []);
       setGoals(goalData.goals || []);
       setAssets(assetData.assets || []);
+      setResolutions(resData.resolutions || []);
     } catch (e) {
       console.error("Failed to fetch company entities", e);
     }
@@ -137,7 +144,7 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
           const data = JSON.parse(event.data);
           if (data.type === 'company_updated') {
             fetchCompany();
-          } else if (data.type === 'agents_updated' || data.type === 'messages_updated' || data.type === 'tasks_updated' || data.type === 'goals_updated' || data.type === 'assets_updated') {
+          } else if (data.type === 'agents_updated' || data.type === 'messages_updated' || data.type === 'tasks_updated' || data.type === 'goals_updated' || data.type === 'assets_updated' || data.type === 'resolutions_updated') {
             fetchCompanyEntities();
           }
         } catch (e) {
@@ -326,6 +333,47 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const addResolution = async (resolution: BoardResolution) => {
+    if (!company?.id) return;
+    try {
+      await apiFetch(`/api/companies/${company.id}/resolutions`, {
+        method: 'POST',
+        body: JSON.stringify(resolution)
+      });
+      setResolutions(prev => [resolution, ...prev]);
+    } catch (error) {
+      console.error("Error adding resolution:", error);
+      throw error;
+    }
+  };
+
+  const updateResolution = async (id: string, updates: Partial<BoardResolution>) => {
+    if (!company?.id) return;
+    try {
+      await apiFetch(`/api/resolutions/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates)
+      });
+      setResolutions(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+    } catch (error) {
+      console.error("Error updating resolution:", error);
+      throw error;
+    }
+  };
+
+  const deleteResolution = async (id: string) => {
+    if (!company?.id) return;
+    try {
+      await apiFetch(`/api/resolutions/${id}`, {
+        method: 'DELETE'
+      });
+      setResolutions(prev => prev.filter(r => r.id !== id));
+    } catch (error) {
+      console.error("Error deleting resolution:", error);
+      throw error;
+    }
+  };
+
   return (
     <CSuiteContext.Provider value={{ 
       user, authReady, company, companyLoading, setCompany, updateCompany, 
@@ -333,7 +381,8 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
       messages, addMessage, updateMessage, clearMessages,
       tasks, addTask, updateTask, deleteTask,
       goals, addGoal, updateGoal, deleteGoal,
-      assets, addAsset, deleteAsset
+      assets, addAsset, deleteAsset,
+      resolutions, addResolution, updateResolution, deleteResolution
     }}>
       {children}
     </CSuiteContext.Provider>

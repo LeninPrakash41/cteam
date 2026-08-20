@@ -15,10 +15,11 @@ interface ChatMessageProps {
   onApproveProposal?: (messageId: string, proposal: Proposal) => void;
   onRejectProposal?: (messageId: string, proposal: Proposal) => void;
   onSaveAsset?: (message: Message) => void;
+  onPassResolution?: (title: string, content: string) => void;
   isStreaming?: boolean;
 }
 
-export function ChatMessage({ message, agent, onReply, onEdit, onApproveProposal, onRejectProposal, onSaveAsset, isStreaming }: ChatMessageProps) {
+export function ChatMessage({ message, agent, onReply, onEdit, onApproveProposal, onRejectProposal, onSaveAsset, onPassResolution, isStreaming }: ChatMessageProps) {
   const isUser = message.senderId === 'user';
 
   const handleDownloadDocx = async () => {
@@ -120,6 +121,36 @@ export function ChatMessage({ message, agent, onReply, onEdit, onApproveProposal
 
           {message.proposals && message.proposals.length > 0 && (
             <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between gap-2 pb-1 border-b border-zinc-200/60">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Executive Board Proposals</span>
+                <div className="flex items-center gap-2">
+                  {message.proposals.some(p => p.status === 'pending') && (
+                    <button
+                      onClick={() => {
+                        message.proposals?.filter(p => p.status === 'pending').forEach(p => {
+                          onApproveProposal?.(message.id, p);
+                        });
+                      }}
+                      className="text-[10px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-md transition-colors"
+                    >
+                      Approve All
+                    </button>
+                  )}
+                  {onPassResolution && (
+                    <button
+                      onClick={() => {
+                        const title = message.proposals?.[0]?.title ? `Board Resolution: ${message.proposals[0].title}` : "Board Resolution on Executive Plan";
+                        const content = `WHEREAS the Executive Board has reviewed and discussed the proposed action items:\n\n${message.proposals?.map(p => `- ${p.title} (${p.type.toUpperCase()})`).join('\n')}\n\nRESOLVED THAT the Board hereby approves and adopts these measures in full.`;
+                        onPassResolution(title, content);
+                      }}
+                      className="text-[10px] font-bold text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded-md transition-colors"
+                    >
+                      Pass Board Resolution
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {message.proposals.map(proposal => (
                 <div key={proposal.id} className="flex items-center justify-between gap-4 p-3 bg-zinc-50 border border-zinc-200 rounded-xl">
                   <div className="flex flex-col">

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Users, MessageSquare, LogOut, Briefcase, Target, Menu, X, Settings } from 'lucide-react';
+import { Users, MessageSquare, LogOut, Briefcase, Target, Menu, X, Settings, Award } from 'lucide-react';
 import { useCSuite } from '../store';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -106,6 +106,18 @@ export function Layout() {
             >
               <MessageSquare className="w-4 h-4" />
               Boardroom
+            </NavLink>
+            <NavLink
+              to="/resolutions"
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                  isActive ? "bg-zinc-100 text-zinc-900" : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900"
+                )
+              }
+            >
+              <Award className="w-4 h-4" />
+              Board Resolutions
             </NavLink>
             <NavLink
               to="/integrations"

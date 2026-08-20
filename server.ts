@@ -25,6 +25,7 @@ const memoryDb: {
   tasks: Map<string, any>;
   goals: Map<string, any>;
   assets: Map<string, any>;
+  resolutions: Map<string, any>;
 } = {
   users: new Map(),
   companies: new Map(),
@@ -32,7 +33,8 @@ const memoryDb: {
   messages: new Map(),
   tasks: new Map(),
   goals: new Map(),
-  assets: new Map()
+  assets: new Map(),
+  resolutions: new Map()
 };
 
 memoryDb.users.set('admin_01', { id: 'admin_01', email: 'admin@csuite.ai', password: 'AdminPassword123!', name: 'System Admin', avatarUrl: 'https://picsum.photos/seed/admin/200' });
@@ -114,6 +116,20 @@ async function initDatabase() {
         company_id TEXT,
         name TEXT,
         content TEXT,
+        created_at BIGINT
+      );
+
+      CREATE TABLE IF NOT EXISTS resolutions (
+        id TEXT PRIMARY KEY,
+        company_id TEXT,
+        resolution_number TEXT,
+        title TEXT,
+        category TEXT,
+        content TEXT,
+        proposed_by TEXT,
+        status TEXT,
+        votes JSONB DEFAULT '[]'::jsonb,
+        passed_at BIGINT,
         created_at BIGINT
       );
 
@@ -668,6 +684,128 @@ async function startServer() {
 
     memoryDb.assets.delete(id);
     broadcastChange("assets_updated", { companyId: existing?.companyId });
+    res.json({ success: true });
+  });
+
+  // Resolutions
+  app.get("/api/companies/:companyId/resolutions", async (req, res) => {
+    const { companyId } = req.params;
+    if (usePostgres && pool) {
+      try {
+        const result = await pool.query(`SELECT * FROM resolutions WHERE company_id = $1 ORDER BY created_at DESC`, [companyId]);
+        const resolutions = result.rows.map(r => ({
+          id: r.id,
+          companyId: r.company_id,
+          resolutionNumber: r.resolution_number,
+          title: r.title,
+          category: r.category,
+          content: r.content,
+          proposedBy: r.proposed_by,
+          status: r.status,
+          votes: typeof r.votes === 'string' ? JSON.parse(r.votes) : (r.votes || []),
+          passedAt: r.passed_at ? Number(r.passed_at) : undefined,
+          createdAt: Number(r.created_at)
+        }));
+        return res.json({ resolutions });
+      } catch (e: any) {
+        console.error("PG Get Resolutions error:", e);
+      }
+    }
+
+    const resolutions = Array.from(memoryDb.resolutions.values())
+      .filter(r => r.companyId === companyId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    res.json({ resolutions });
+  });
+
+  app.post("/api/companies/:companyId/resolutions", async (req, res) => {
+    const { companyId } = req.params;
+    const resolution = req.body;
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(
+          `INSERT INTO resolutions (id, company_id, resolution_number, title, category, content, proposed_by, status, votes, passed_at, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           ON CONFLICT (id) DO UPDATE SET 
+             title = EXCLUDED.title,
+             category = EXCLUDED.category,
+             content = EXCLUDED.content,
+             status = EXCLUDED.status,
+             votes = EXCLUDED.votes,
+             passed_at = EXCLUDED.passed_at`,
+          [
+            resolution.id,
+            companyId,
+            resolution.resolutionNumber || `RES-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
+            resolution.title,
+            resolution.category || 'Strategic',
+            resolution.content,
+            resolution.proposedBy || 'Founder',
+            resolution.status || 'Draft',
+            JSON.stringify(resolution.votes || []),
+            resolution.passedAt || null,
+            resolution.createdAt || Date.now()
+          ]
+        );
+      } catch (e: any) {
+        console.error("PG Post Resolution error:", e);
+      }
+    }
+
+    memoryDb.resolutions.set(resolution.id, { ...resolution, companyId });
+    broadcastChange("resolutions_updated", { companyId });
+    res.json({ success: true, resolution });
+  });
+
+  app.patch("/api/resolutions/:id", async (req, res) => {
+    const { id } = req.params;
+    const updates = req.body;
+
+    let existing = memoryDb.resolutions.get(id) || { id };
+    const updated = { ...existing, ...updates };
+
+    if (usePostgres && pool) {
+      try {
+        const fields: string[] = [];
+        const values: any[] = [];
+        let idx = 1;
+
+        if (updates.title !== undefined) { fields.push(`title = $${idx++}`); values.push(updates.title); }
+        if (updates.category !== undefined) { fields.push(`category = $${idx++}`); values.push(updates.category); }
+        if (updates.content !== undefined) { fields.push(`content = $${idx++}`); values.push(updates.content); }
+        if (updates.status !== undefined) { fields.push(`status = $${idx++}`); values.push(updates.status); }
+        if (updates.votes !== undefined) { fields.push(`votes = $${idx++}`); values.push(JSON.stringify(updates.votes)); }
+        if (updates.passedAt !== undefined) { fields.push(`passed_at = $${idx++}`); values.push(updates.passedAt); }
+
+        if (fields.length > 0) {
+          values.push(id);
+          await pool.query(`UPDATE resolutions SET ${fields.join(', ')} WHERE id = $${idx}`, values);
+        }
+      } catch (e: any) {
+        console.error("PG Patch Resolution error:", e);
+      }
+    }
+
+    memoryDb.resolutions.set(id, updated);
+    broadcastChange("resolutions_updated", { companyId: updated.companyId });
+    res.json({ success: true, resolution: updated });
+  });
+
+  app.delete("/api/resolutions/:id", async (req, res) => {
+    const { id } = req.params;
+    const existing = memoryDb.resolutions.get(id);
+
+    if (usePostgres && pool) {
+      try {
+        await pool.query(`DELETE FROM resolutions WHERE id = $1`, [id]);
+      } catch (e: any) {
+        console.error("PG Delete Resolution error:", e);
+      }
+    }
+
+    memoryDb.resolutions.delete(id);
+    broadcastChange("resolutions_updated", { companyId: existing?.companyId });
     res.json({ success: true });
   });
 
