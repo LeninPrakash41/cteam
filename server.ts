@@ -713,38 +713,80 @@ async function startServer() {
     const { companyId } = req.params;
     if (usePostgres && pool) {
       try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS resolutions (
+            id TEXT PRIMARY KEY,
+            company_id TEXT,
+            resolution_number TEXT,
+            title TEXT,
+            category TEXT,
+            content TEXT,
+            proposed_by TEXT,
+            status TEXT,
+            votes JSONB DEFAULT '[]'::jsonb,
+            passed_at BIGINT,
+            created_at BIGINT
+          );
+        `);
         const result = await pool.query(`SELECT * FROM resolutions WHERE company_id = $1 ORDER BY created_at DESC`, [companyId]);
-        const resolutions = result.rows.map(r => ({
-          id: r.id,
-          companyId: r.company_id,
-          resolutionNumber: r.resolution_number,
-          title: r.title,
-          category: r.category,
-          content: r.content,
-          proposedBy: r.proposed_by,
-          status: r.status,
-          votes: typeof r.votes === 'string' ? JSON.parse(r.votes) : (r.votes || []),
-          passedAt: r.passed_at ? Number(r.passed_at) : undefined,
-          createdAt: Number(r.created_at)
-        }));
+        const resolutions = result.rows.map(r => {
+          let parsedVotes: any[] = [];
+          if (Array.isArray(r.votes)) {
+            parsedVotes = r.votes;
+          } else if (typeof r.votes === 'string') {
+            try { parsedVotes = JSON.parse(r.votes); } catch (e) { parsedVotes = []; }
+          }
+          return {
+            id: r.id,
+            companyId: r.company_id,
+            resolutionNumber: r.resolution_number || '',
+            title: r.title || '',
+            category: r.category || 'Strategic',
+            content: r.content || '',
+            proposedBy: r.proposed_by || 'Founder',
+            status: r.status || 'Draft',
+            votes: parsedVotes,
+            passedAt: r.passed_at ? Number(r.passed_at) : undefined,
+            createdAt: Number(r.created_at || Date.now())
+          };
+        });
         return res.json({ resolutions });
       } catch (e: any) {
         console.error("PG Get Resolutions error:", e);
       }
     }
 
-    const resolutions = Array.from((memoryDb.resolutions || new Map()).values())
-      .filter(r => r.companyId === companyId)
-      .sort((a, b) => b.createdAt - a.createdAt);
-    res.json({ resolutions: resolutions || [] });
+    try {
+      const resolutions = Array.from((memoryDb.resolutions || new Map()).values())
+        .filter(r => r && r.companyId === companyId)
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      return res.json({ resolutions: resolutions || [] });
+    } catch (e: any) {
+      return res.json({ resolutions: [] });
+    }
   });
 
   app.post("/api/companies/:companyId/resolutions", async (req, res) => {
     const { companyId } = req.params;
-    const resolution = req.body;
+    const resolution = req.body || {};
 
     if (usePostgres && pool) {
       try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS resolutions (
+            id TEXT PRIMARY KEY,
+            company_id TEXT,
+            resolution_number TEXT,
+            title TEXT,
+            category TEXT,
+            content TEXT,
+            proposed_by TEXT,
+            status TEXT,
+            votes JSONB DEFAULT '[]'::jsonb,
+            passed_at BIGINT,
+            created_at BIGINT
+          );
+        `);
         await pool.query(
           `INSERT INTO resolutions (id, company_id, resolution_number, title, category, content, proposed_by, status, votes, passed_at, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -759,9 +801,9 @@ async function startServer() {
             resolution.id,
             companyId,
             resolution.resolutionNumber || `RES-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
-            resolution.title,
+            resolution.title || '',
             resolution.category || 'Strategic',
-            resolution.content,
+            resolution.content || '',
             resolution.proposedBy || 'Founder',
             resolution.status || 'Draft',
             JSON.stringify(resolution.votes || []),
@@ -774,16 +816,18 @@ async function startServer() {
       }
     }
 
-    memoryDb.resolutions.set(resolution.id, { ...resolution, companyId });
+    if (memoryDb.resolutions) {
+      memoryDb.resolutions.set(resolution.id, { ...resolution, companyId });
+    }
     broadcastChange("resolutions_updated", { companyId });
-    res.json({ success: true, resolution });
+    return res.json({ success: true, resolution });
   });
 
   app.patch("/api/resolutions/:id", async (req, res) => {
     const { id } = req.params;
-    const updates = req.body;
+    const updates = req.body || {};
 
-    let existing = memoryDb.resolutions.get(id) || { id };
+    let existing = (memoryDb.resolutions ? memoryDb.resolutions.get(id) : null) || { id };
     const updated = { ...existing, ...updates };
 
     if (usePostgres && pool) {
@@ -808,14 +852,16 @@ async function startServer() {
       }
     }
 
-    memoryDb.resolutions.set(id, updated);
+    if (memoryDb.resolutions) {
+      memoryDb.resolutions.set(id, updated);
+    }
     broadcastChange("resolutions_updated", { companyId: updated.companyId });
-    res.json({ success: true, resolution: updated });
+    return res.json({ success: true, resolution: updated });
   });
 
   app.delete("/api/resolutions/:id", async (req, res) => {
     const { id } = req.params;
-    const existing = memoryDb.resolutions.get(id);
+    const existing = memoryDb.resolutions ? memoryDb.resolutions.get(id) : null;
 
     if (usePostgres && pool) {
       try {
@@ -825,9 +871,11 @@ async function startServer() {
       }
     }
 
-    memoryDb.resolutions.delete(id);
+    if (memoryDb.resolutions) {
+      memoryDb.resolutions.delete(id);
+    }
     broadcastChange("resolutions_updated", { companyId: existing?.companyId });
-    res.json({ success: true });
+    return res.json({ success: true });
   });
 
   // --- EXISTING HUBSPOT & THIRD-PARTY TOOL APIS ---
