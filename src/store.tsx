@@ -343,42 +343,39 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
 
   const addResolution = async (resolution: BoardResolution) => {
     if (!company?.id) return;
+    setResolutions(prev => [resolution, ...prev.filter(r => r.id !== resolution.id)]);
     try {
       await apiFetch(`/api/companies/${company.id}/resolutions`, {
         method: 'POST',
         body: JSON.stringify(resolution)
       });
-      setResolutions(prev => [resolution, ...prev]);
     } catch (error) {
-      console.error("Error adding resolution:", error);
-      throw error;
+      console.warn("Resolution sync warning:", error);
     }
   };
 
   const updateResolution = async (id: string, updates: Partial<BoardResolution>) => {
     if (!company?.id) return;
+    setResolutions(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
     try {
       await apiFetch(`/api/resolutions/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(updates)
       });
-      setResolutions(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
     } catch (error) {
-      console.error("Error updating resolution:", error);
-      throw error;
+      console.warn("Resolution update warning:", error);
     }
   };
 
   const deleteResolution = async (id: string) => {
     if (!company?.id) return;
+    setResolutions(prev => prev.filter(r => r.id !== id));
     try {
       await apiFetch(`/api/resolutions/${id}`, {
         method: 'DELETE'
       });
-      setResolutions(prev => prev.filter(r => r.id !== id));
     } catch (error) {
-      console.error("Error deleting resolution:", error);
-      throw error;
+      console.warn("Resolution delete warning:", error);
     }
   };
 
