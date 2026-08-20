@@ -68,10 +68,31 @@ export async function logOut(): Promise<void> {
 
 // Database helper functions calling backend APIs
 export async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  let res = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
     ...options
   });
+
+  // Fallback to Express backend port if proxy misses 404
+  if (res.status === 404 && url.startsWith('/api/')) {
+    const backendHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+      ? 'http://localhost:3000' 
+      : '';
+    if (backendHost) {
+      try {
+        const fallbackRes = await fetch(`${backendHost}${url}`, {
+          headers: { 'Content-Type': 'application/json', ...(options?.headers || {}) },
+          ...options
+        });
+        if (fallbackRes.ok) {
+          return fallbackRes.json();
+        }
+      } catch (e) {
+        // ignore fallback error
+      }
+    }
+  }
+
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
     throw new Error(errorData.error || `HTTP error ${res.status}`);
