@@ -249,7 +249,11 @@ Founder & Board Chair
                       Certificate
                     </button>
                     <button
-                      onClick={() => deleteResolution(res.id)}
+                      onClick={() => {
+                        if (confirm(`Are you sure you want to delete resolution "${res.title}"?`)) {
+                          deleteResolution(res.id);
+                        }
+                      }}
                       className="p-1.5 text-zinc-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
                       title="Delete Resolution"
                     >

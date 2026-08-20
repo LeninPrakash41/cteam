@@ -93,6 +93,22 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
     }
   }, [authReady, fetchCompany]);
 
+  // Resolution persistent cache helpers
+  const getCachedResolutions = (cid: string): BoardResolution[] => {
+    try {
+      const data = localStorage.getItem(`cteam_resolutions_${cid}`);
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
+  };
+
+  const setCachedResolutions = (cid: string, resList: BoardResolution[]) => {
+    try {
+      localStorage.setItem(`cteam_resolutions_${cid}`, JSON.stringify(resList));
+    } catch (e) {}
+  };
+
   // Fetch sub-entities when company changes
   const fetchCompanyEntities = useCallback(async () => {
     if (!company?.id) {
@@ -101,6 +117,7 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
       setTasks([]);
       setGoals([]);
       setAssets([]);
+      setResolutions([]);
       return;
     }
 
@@ -119,7 +136,17 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
       if (results[2].status === 'fulfilled') setTasks(results[2].value.tasks || []);
       if (results[3].status === 'fulfilled') setGoals(results[3].value.goals || []);
       if (results[4].status === 'fulfilled') setAssets(results[4].value.assets || []);
-      if (results[5].status === 'fulfilled') setResolutions(results[5].value.resolutions || []);
+      
+      // Combine API fetched resolutions with offline cached resolutions
+      const fetchedRes = results[5].status === 'fulfilled' ? (results[5].value.resolutions || []) : [];
+      const cachedRes = getCachedResolutions(company.id);
+      const resMap = new Map<string, BoardResolution>();
+      cachedRes.forEach(r => resMap.set(r.id, r));
+      fetchedRes.forEach(r => resMap.set(r.id, r));
+      const combinedRes = Array.from(resMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+      
+      setResolutions(combinedRes);
+      setCachedResolutions(company.id, combinedRes);
     } catch (e) {
       console.error("Failed to fetch company entities", e);
     }
@@ -343,7 +370,11 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
 
   const addResolution = async (resolution: BoardResolution) => {
     if (!company?.id) return;
-    setResolutions(prev => [resolution, ...prev.filter(r => r.id !== resolution.id)]);
+    setResolutions(prev => {
+      const updated = [resolution, ...prev.filter(r => r.id !== resolution.id)];
+      setCachedResolutions(company.id, updated);
+      return updated;
+    });
     try {
       await apiFetch(`/api/companies/${company.id}/resolutions`, {
         method: 'POST',
@@ -356,7 +387,11 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
 
   const updateResolution = async (id: string, updates: Partial<BoardResolution>) => {
     if (!company?.id) return;
-    setResolutions(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+    setResolutions(prev => {
+      const updated = prev.map(r => r.id === id ? { ...r, ...updates } : r);
+      setCachedResolutions(company.id, updated);
+      return updated;
+    });
     try {
       await apiFetch(`/api/resolutions/${id}`, {
         method: 'PATCH',
@@ -369,7 +404,11 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
 
   const deleteResolution = async (id: string) => {
     if (!company?.id) return;
-    setResolutions(prev => prev.filter(r => r.id !== id));
+    setResolutions(prev => {
+      const updated = prev.filter(r => r.id !== id);
+      setCachedResolutions(company.id, updated);
+      return updated;
+    });
     try {
       await apiFetch(`/api/resolutions/${id}`, {
         method: 'DELETE'
