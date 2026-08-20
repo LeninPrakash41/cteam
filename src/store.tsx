@@ -105,7 +105,7 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const [agentsData, msgData, taskData, goalData, assetData, resData] = await Promise.all([
+      const results = await Promise.allSettled([
         apiFetch<{ agents: Agent[] }>(`/api/companies/${company.id}/agents`),
         apiFetch<{ messages: Message[] }>(`/api/companies/${company.id}/messages`),
         apiFetch<{ tasks: Task[] }>(`/api/companies/${company.id}/tasks`),
@@ -114,12 +114,12 @@ export function CSuiteProvider({ children }: { children: ReactNode }) {
         apiFetch<{ resolutions: BoardResolution[] }>(`/api/companies/${company.id}/resolutions`)
       ]);
 
-      setTeam(agentsData.agents || []);
-      setMessages(msgData.messages || []);
-      setTasks(taskData.tasks || []);
-      setGoals(goalData.goals || []);
-      setAssets(assetData.assets || []);
-      setResolutions(resData.resolutions || []);
+      if (results[0].status === 'fulfilled') setTeam(results[0].value.agents || []);
+      if (results[1].status === 'fulfilled') setMessages(results[1].value.messages || []);
+      if (results[2].status === 'fulfilled') setTasks(results[2].value.tasks || []);
+      if (results[3].status === 'fulfilled') setGoals(results[3].value.goals || []);
+      if (results[4].status === 'fulfilled') setAssets(results[4].value.assets || []);
+      if (results[5].status === 'fulfilled') setResolutions(results[5].value.resolutions || []);
     } catch (e) {
       console.error("Failed to fetch company entities", e);
     }

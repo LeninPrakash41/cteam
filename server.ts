@@ -733,10 +733,10 @@ async function startServer() {
       }
     }
 
-    const resolutions = Array.from(memoryDb.resolutions.values())
+    const resolutions = Array.from((memoryDb.resolutions || new Map()).values())
       .filter(r => r.companyId === companyId)
       .sort((a, b) => b.createdAt - a.createdAt);
-    res.json({ resolutions });
+    res.json({ resolutions: resolutions || [] });
   });
 
   app.post("/api/companies/:companyId/resolutions", async (req, res) => {
